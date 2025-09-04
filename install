@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# root 権限が必要な処理に備えて sudo を使う（root の場合は空）
+if [ "$(id -u)" -ne 0 ]; then
+  SUDO="sudo"
+else
+  SUDO=""
+fi
+
+# 1) 必要パッケージのインストール（重複防止のためここで一元管理）
+DEBIAN_FRONTEND=noninteractive $SUDO apt-get update
+DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends \
+  curl ca-certificates git bash-completion locales-all
+
+# APT キャッシュ掃除
+${SUDO} rm -rf /var/lib/apt/lists/* || true
+${SUDO} apt-get clean || true
+
+# 2) ロケール設定（devcontainer.json からは削除し、こちらを優先）
+if [ -n "${SUDO}" ]; then
+  ${SUDO} tee /etc/default/locale >/dev/null <<'EOF'
+LANG=ja_JP.UTF-8
+LC_ALL=ja_JP.UTF-8
+LANGUAGE=ja_JP:ja
+EOF
+else
+  # root の場合も同様に反映
+  cat >/etc/default/locale <<'EOF'
+LANG=ja_JP.UTF-8
+LC_ALL=ja_JP.UTF-8
+LANGUAGE=ja_JP:ja
+EOF
+fi
+
+export LANG=ja_JP.UTF-8
+export LC_ALL=ja_JP.UTF-8
+export LANGUAGE=ja_JP:ja
+
+# 3) dotfiles の適用（ワークスペース配下に dotfiles/ がある場合）
+apply_dotfiles() {
+  local src_dir="$1"
+  local home_dir="$2"
+
+  echo "[dotfiles] Applying from ${src_dir} to ${home_dir}"
+
+  # 安全のためバックアップしてからシンボリックリンクを貼る
+  link_file() {
+    local src_file="$1"
+    local dest_file="$2"
+
+    if [ -e "${dest_file}" ] || [ -L "${dest_file}" ]; then
+      # 既に同一先へリンク済みなら何もしない
+      if [ "$(readlink -f "${dest_file}" 2>/dev/null || true)" = "$(readlink -f "${src_file}")" ]; then
+        echo "  - Already linked: ${dest_file}"
+        return 0
+      fi
+      local ts
+      ts=$(date +%Y%m%d%H%M%S)
+      mv -f "${dest_file}" "${dest_file}.bak.${ts}"
+      echo "  - Backed up: ${dest_file} -> ${dest_file}.bak.${ts}"
+    fi
+    ln -s "${src_file}" "${dest_file}"
+    echo "  - Linked: ${dest_file} -> ${src_file}"
+  }
+
+  # bashrc
+  if [ -f "${src_dir}/bashrc" ]; then
+    link_file "${src_dir}/bashrc" "${home_dir}/.bashrc"
+  fi
+
+  # bashprofile -> .bash_profile（ログインシェル用）
+  if [ -f "${src_dir}/bashprofile" ]; then
+    link_file "${src_dir}/bashprofile" "${home_dir}/.bash_profile"
+  fi
+
+  # inputrc
+  if [ -f "${src_dir}/inputrc" ]; then
+    link_file "${src_dir}/inputrc" "${home_dir}/.inputrc"
+  fi
+}
+
+# ワークスペース直下の dotfiles を検出して適用（複数候補を順に探索）
+detect_and_apply_dotfiles() {
+  local script_dir ws_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ws_dir="$(cd "${script_dir}/.." && pwd)"   # dotfiles の 1 つ上 = ワークスペース想定
+
+  # 候補を列挙（最初に見つかったものを使用）
+  local candidates=(
+    "${ws_dir}/dotfiles"
+    "/workspace/dotfiles"
+    "/workspaces"/*"/dotfiles"
+    "${PWD}/dotfiles"
+  )
+
+  local d
+  for d in "${candidates[@]}"; do
+    if [ -d "${d}" ]; then
+      apply_dotfiles "${d}" "${HOME}"
+      return 0
+    fi
+  done
+
+  echo "[dotfiles] Not found. Skipped. Checked: ${candidates[*]}"
+}
+
+detect_and_apply_dotfiles
+
+# 4) uv を /usr/local/bin にインストール（PATH 問題を根治）
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh \
+    | ${SUDO} env UV_INSTALL_DIR="/usr/local/bin" UV_NO_MODIFY_PATH=1 sh
+else
+  echo "uv is already installed: $(command -v uv)"
+fi
+
+# 5) （任意）バージョン確認
+git --version || true
+uv --version || true
+
+# bash-completion を有効化（対話セッション用）
+if [ -f /etc/bash_completion ]; then
+  . /etc/bash_completion
+fi
+
+# 任意のプロジェクトディレクトリへ移動（存在する場合のみ）
+if [ -d ./crafter_pytorch ]; then
+  cd ./crafter_pytorch
+fi
+
+echo "[install] completed"
