@@ -11,7 +11,8 @@ fi
 # 1) 必要パッケージのインストール（重複防止のためここで一元管理）
 DEBIAN_FRONTEND=noninteractive $SUDO apt-get update
 DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y --no-install-recommends \
-  curl ca-certificates git bash-completion locales-all
+  curl ca-certificates git bash-completion locales-all \
+  fonts-noto-cjk
 
 # APT キャッシュ掃除
 ${SUDO} rm -rf /var/lib/apt/lists/* || true
@@ -123,6 +124,57 @@ uv --version || true
 if [ -f /etc/bash_completion ]; then
   . /etc/bash_completion
 fi
+
+# 6) /workspace の .venv を作成・修復（壊れたシンボリックリンク対策）
+repair_or_create_venv() {
+  local ws_dir
+  # devcontainer.json で workspaceFolder を /workspace にしている前提
+  if [ -d "/workspace" ]; then
+    ws_dir="/workspace"
+  else
+    ws_dir="$(pwd)"
+  fi
+
+  cd "${ws_dir}" || return 0
+
+  local py
+  py="$(command -v python3 || true)"
+  if [ -z "${py}" ]; then
+    echo "[venv] python3 が見つかりません。スキップします。" >&2
+    return 0
+  fi
+
+  local recreate="false"
+  if [ -d .venv ]; then
+    if [ ! -x .venv/bin/python3 ]; then
+      recreate="true"
+    else
+      # シンボリックリンク先が存在するか確認
+      local target
+      target=$(readlink -f .venv/bin/python3 || true)
+      if [ -n "${target}" ] && [ ! -x "${target}" ]; then
+        recreate="true"
+      fi
+    fi
+  else
+    recreate="true"
+  fi
+
+  if [ "${recreate}" = "true" ]; then
+    echo "[venv] Recreate .venv using container's python: ${py}"
+    rm -rf .venv || true
+    if command -v uv >/dev/null 2>&1; then
+      uv venv --python "${py}"
+    else
+      "${py}" -m venv .venv
+    fi
+    echo "[venv] Created: ${ws_dir}/.venv"
+  else
+    echo "[venv] Existing .venv looks OK. Skipped."
+  fi
+}
+
+repair_or_create_venv
 
 # 任意のプロジェクトディレクトリへ移動（存在する場合のみ）
 if [ -d ./crafter_pytorch ]; then
