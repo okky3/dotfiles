@@ -4,8 +4,8 @@ set -euo pipefail
 
 
 # 2) ロケール設定（devcontainer.json からは削除し、こちらを優先）
-if [ -n "${SUDO}" ]; then
-  ${SUDO} tee /etc/default/locale >/dev/null <<'EOF'
+if [ -n "${SUDO:-}" ]; then
+  ${SUDO:-} tee /etc/default/locale >/dev/null <<'EOF'
 LANG=ja_JP.UTF-8
 LC_ALL=ja_JP.UTF-8
 LANGUAGE=ja_JP:ja
