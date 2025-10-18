@@ -28,3 +28,4 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 source /workspace/.venv/bin/activate
 PATH="/workspace/.venv/bin:${PATH}"
+source /opt/crafter_pytorch/.venv/bin/activate
